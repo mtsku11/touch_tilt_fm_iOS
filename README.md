@@ -1,7 +1,7 @@
 
-# Touch + Tilt FM Synth
+# Touch Tilt FM iOS
 
-This example demonstrates how to use touch and tilt controls in a web browser to manipulate a polyphonic FM synthesizer, using Csound running in WebAssembly (WASM).
+This project is a mobile-first browser instrument that uses multitouch and device tilt to control a three-voice FM synthesizer in Csound WebAssembly.
 
 ## Goals
 This project integrates real-time touch interaction and motion sensors to control a three-voice FM synth:
@@ -10,7 +10,7 @@ This project integrates real-time touch interaction and motion sensors to contro
 2. Compile a polyphonic FM synthesis instrument  
 3. Handle multitouch input to control pitch and amplitude  
 4. Use device tilt (via DeviceOrientation) to modulate FM depth and ratio  
-5. Add stereo random panning to spatialize the voices  
+5. Keep the FM range stable enough for iOS playback without harsh foldover noise
 
 ## CsoundObj API Usage
 This app uses the following CsoundObj methods:
@@ -39,14 +39,14 @@ Each touch is mapped to a fixed musical scale (Y axis → pitch) and X axis (amp
 
 ### Tilt Mapping
 ```javascript
-const gammaNorm = Math.abs(gamma) / 90;
+const gammaNorm = Math.min(Math.abs(gamma) / 75, 1);
 const betaNorm = (beta + 90) / 180;
-const fmIndex = gammaNorm * 0.8;
-const ratios = [0.5, 1, 1.5, 2, 3, 4];
+const fmIndex = gammaNorm * 0.55;
+const ratios = [0.5, 0.75, 1, 1.25, 1.5, 2, 2.5];
 const fmRatio = ratios[Math.min(Math.floor(betaNorm * ratios.length), ratios.length - 1)];
 ```
 - Gamma (left/right tilt) controls FM **index**  
-- Beta (forward/backward tilt) selects one of several musical FM **ratios**  
+- Beta (forward/backward tilt) selects one of several moderated FM **ratios**
 
 ### Csound Instrument
 ```csound
@@ -54,26 +54,24 @@ instr 1
   kamp1 = portk(chnget:k("amp1"), krelease)
   kfreq1 = chnget:k("freq1")
   ...
-  kfmRatio = portk(chnget:k("fmRatio"), 0.1)
-  kfmFreq1 = kfreq1 * kfmRatio
-  ...
-  amod1 oscili kfmIndex * kfmFreq1, kfmFreq1
-  acar1 oscili kamp1, kfreq1 + amod1
+  aleft1, aright1 Voice kamp1, kfreq1, 0.18
+  aleft = aleft1 + aleft2 + aleft3
+  aleft = tanh(aleft * 1.35) * 0.72
 ```
-The modulation frequency is dynamically linked to the carrier: `modFreq = carrier * ratio`, ensuring harmonic overtones. Three identical voices are mixed together.
+The modulation ratio is dynamically linked to the carrier, but the ratio and index are clamped before synthesis. The synth uses `foscil`, low-pass filtering, DC blocking, lower per-voice gain, and soft limiting to reduce the noisy behaviour caused by extreme tilt-driven FM deviation.
 
 ### Stereo Panning
 ```csound
-apan1 random 0, 1
-aleft = acar1 * apan1
-aright = acar1 * (1 - apan1)
+kpan1 = 0.18
+kpan2 = 0.5
+kpan3 = 0.82
 ```
-Each voice is randomly panned across the stereo field on each reinitialization. Voices are mixed and scaled to prevent clipping.
+The voices are placed across a stable stereo field. This avoids extra random movement in the signal path while keeping the multitouch layers spatially separated.
 
 ## HTML Layout
 ```html
 <div id="starter">
-  <button id="startAllBtn">▶️ Start Synth + Tilt</button>
+  <button id="startAllBtn">Start Synth + Tilt</button>
   <input id="releaseSlider" type="range" min="0.01" max="0.3" />
 </div>
 <div id="xy-pad"></div>
@@ -83,7 +81,7 @@ A button starts the synth and requests motion permissions. A slider controls the
 ## Permissions
 iOS requires:
 - **User gesture** to enable motion sensing (via `DeviceOrientationEvent.requestPermission()`)  
-- **HTTPS origin** for both motion and microphone access  
+- **HTTPS origin** for motion access
 
 These are handled as soon as the user presses the start button.
 
@@ -103,5 +101,4 @@ csound.setControlChannel("fmIndex", 0.5)
 ```
 
 ## Conclusion
-This app showcases a full-featured, mobile-first FM synth powered by WebAssembly and gesture input. You can touch and tilt to explore harmonics, motion-based modulation, and spatial sound. It's a minimal but expressive interface for exploring interactive audio in the browser.
-
+This app is a compact iOS-oriented FM instrument powered by WebAssembly and gesture input. You can touch and tilt to explore harmonics, motion-based modulation, and spatial sound from a single browser page.

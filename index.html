@@ -3,6 +3,7 @@
 <head>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Touch Tilt FM Synth</title>
+  <link rel="icon" href="data:,">
   <style>
     body {
       margin: 0;
@@ -42,10 +43,10 @@
   </style>
 </head>
 <body>
-  <h2>🎛 Touch + Tilt FM Synth 🎛</h2>
+  <h2>Touch Tilt FM iOS</h2>
 
   <div id="starter" style="text-align:center; padding:20px;">
-    <button id="startAllBtn" style="padding: 16px 24px; font-size: 1.2em; border-radius: 8px;">▶️ Start Synth + Tilt</button>
+    <button id="startAllBtn" style="padding: 16px 24px; font-size: 1.2em; border-radius: 8px;">Start Synth + Tilt</button>
     <p id="status" style="margin-top: 10px;">Waiting to start synth...</p>
 
     <div style="margin-top: 20px;">
@@ -71,18 +72,7 @@
     let csound;
     let instrumentOn = false;
 
-    async function requestMicrophoneAccess() {
-      try {
-        await navigator.mediaDevices.getUserMedia({ audio: true });
-        console.log("Microphone access granted");
-      } catch (err) {
-        alert("Microphone access is required for sound to work.");
-        console.error("Microphone access denied:", err);
-      }
-    }
-
     async function initCsound() {
-      await requestMicrophoneAccess();
       const { Csound } = await import('./js/csound.js');
       csound = await Csound();
 
@@ -96,6 +86,25 @@
         nchnls = 2
         0dbfs = 1
 
+        giSine ftgen 0, 0, 16384, 10, 1
+
+        opcode Voice, aa, kkk
+          kamp, kfreq, kpan xin
+
+          krelease chnget "releaseTime"
+          kfmRatio = portk(limit(chnget:k("fmRatio"), 0.5, 2.5), krelease)
+          kfmIndex = portk(limit(chnget:k("fmIndex"), 0, 0.55), krelease)
+          kfreq = limit(kfreq, 80, 1400)
+
+          asig foscil kamp * 0.18, kfreq, 1, kfmRatio, kfmIndex, giSine
+          asig tone asig, 4200
+          asig dcblock asig
+
+          aleft = asig * sqrt(1 - kpan)
+          aright = asig * sqrt(kpan)
+          xout aleft, aright
+        endop
+
         instr 1
           krelease chnget "releaseTime"
 
@@ -106,31 +115,21 @@
           kamp3 = portk(chnget:k("amp3"), krelease)
           kfreq3 = portk(chnget:k("freq3"), krelease)
 
-          kfmRatio = portk(chnget:k("fmRatio"), krelease)
+          kpan1 = portk(0.18, 0.25)
+          kpan2 = portk(0.5, 0.25)
+          kpan3 = portk(0.82, 0.25)
 
-          kfmFreq1 = kfreq1 * kfmRatio
-          kfmFreq2 = kfreq2 * kfmRatio
-          kfmFreq3 = kfreq3 * kfmRatio
+          aleft1, aright1 Voice kamp1, kfreq1, kpan1
+          aleft2, aright2 Voice kamp2, kfreq2, kpan2
+          aleft3, aright3 Voice kamp3, kfreq3, kpan3
 
-          kfmIndex = portk(chnget:k("fmIndex"), krelease)
+          aleft = aleft1 + aleft2 + aleft3
+          aright = aright1 + aright2 + aright3
 
-          amod1 oscili kfmIndex * kfmFreq1, kfmFreq1
-          acar1 oscili kamp1, kfreq1 + amod1
+          aleft = tanh(aleft * 1.35) * 0.72
+          aright = tanh(aright * 1.35) * 0.72
 
-          amod2 oscili kfmIndex * kfmFreq2, kfmFreq2
-          acar2 oscili kamp2, kfreq2 + amod2
-
-          amod3 oscili kfmIndex * kfmFreq3, kfmFreq3
-          acar3 oscili kamp3, kfreq3 + amod3
-
-          apan1 random 0, 1
-          apan2 random 0, 1
-          apan3 random 0, 1
-
-          aleft = acar1 * apan1 + acar2 * apan2 + acar3 * apan3
-          aright = acar1 * (1 - apan1) + acar2 * (1 - apan2) + acar3 * (1 - apan3)
-
-          outs aleft * 0.3, aright * 0.3
+          outs aleft, aright
         endin
       `);
       await csound.start();
@@ -167,7 +166,7 @@
     }
 
     startAllBtn.addEventListener("click", async () => {
-      if (typeof DeviceOrientationEvent?.requestPermission === 'function') {
+      if (typeof window.DeviceOrientationEvent?.requestPermission === 'function') {
         try {
           const response = await DeviceOrientationEvent.requestPermission();
           if (response === 'granted') {
@@ -217,7 +216,7 @@
         const scale = [293.66, 329.63, 349.23, 392.0, 440.0, 523.25, 587.33, 659.25, 698.46, 783.99, 880.0, 987.77, 1174.66];
         const index = Math.floor((1 - y) * (scale.length - 1));
         const freq = scale[Math.max(0, Math.min(index, scale.length - 1))];
-        const amp = x;
+        const amp = Math.min(0.82, Math.max(0, x));
 
         const voice = getVoiceId(t.identifier);
         csound.setControlChannel(`amp${voice}`, amp);
@@ -248,12 +247,12 @@
   const beta = e.beta || 0;
   const gamma = e.gamma || 0;
 
-  const gammaNorm = Math.abs(gamma) / 90;
+  const gammaNorm = Math.min(Math.abs(gamma) / 75, 1);
   const betaNorm = (beta + 90) / 180;
   const clampedBeta = Math.max(0, Math.min(betaNorm, 0.999));
 
-  const fmIndex = gammaNorm * 0.8;
-  const ratios = [0.5, 1, 1.5, 2, 3, 4];
+  const fmIndex = gammaNorm * 0.55;
+  const ratios = [0.5, 0.75, 1, 1.25, 1.5, 2, 2.5];
   const index = Math.floor(clampedBeta * ratios.length);
   const fmRatio = ratios[index];
 
