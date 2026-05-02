@@ -72,9 +72,9 @@
     let csound;
     let instrumentOn = false;
 
-    async function initCsound() {
+    async function initCsound(audioContext) {
       const { Csound } = await import('./js/csound.js');
-      csound = await Csound();
+      csound = await Csound({ audioContext });
 
       await csound.setOption("-odac");
       await csound.setOption("-b64");
@@ -147,7 +147,7 @@
 
     async function stopInstrument() {
       if (instrumentOn && csound) {
-        await csound.inputMessage("i-1 0 1");
+        await csound.inputMessage("i -1 0 0");
         instrumentOn = false;
       }
     }
@@ -166,12 +166,18 @@
     }
 
     startAllBtn.addEventListener("click", async () => {
+      // Create AudioContext synchronously before any await — required by iOS gesture policy
+      const AudioCtx = window.AudioContext || window.webkitAudioContext;
+      const audioContext = new AudioCtx();
+      if (audioContext.state === 'suspended') {
+        await audioContext.resume();
+      }
+
       if (typeof window.DeviceOrientationEvent?.requestPermission === 'function') {
         try {
           const response = await DeviceOrientationEvent.requestPermission();
           if (response === 'granted') {
             window.addEventListener('deviceorientation', handleTilt);
-            console.log("Tilt permission granted");
           } else {
             alert("Tilt permission denied");
           }
@@ -181,10 +187,9 @@
         }
       } else {
         window.addEventListener('deviceorientation', handleTilt);
-        console.log("No permission request needed");
       }
 
-      if (!csound) await initCsound();
+      if (!csound) await initCsound(audioContext);
       window.synthReady = true;
 
       statusText.innerText = "Synth is running. Touch screen + tilt to play.";
@@ -243,22 +248,22 @@
       }
     }
 
-   function handleTilt(e) {
-  const beta = e.beta || 0;
-  const gamma = e.gamma || 0;
+    function handleTilt(e) {
+      const beta = e.beta || 0;
+      const gamma = e.gamma || 0;
 
-  const gammaNorm = Math.min(Math.abs(gamma) / 75, 1);
-  const betaNorm = (beta + 90) / 180;
-  const clampedBeta = Math.max(0, Math.min(betaNorm, 0.999));
+      const gammaNorm = Math.min(Math.abs(gamma) / 75, 1);
+      const betaNorm = (beta + 90) / 180;
+      const clampedBeta = Math.max(0, Math.min(betaNorm, 0.999));
 
-  const fmIndex = gammaNorm * 0.55;
-  const ratios = [0.5, 0.75, 1, 1.25, 1.5, 2, 2.5];
-  const index = Math.floor(clampedBeta * ratios.length);
-  const fmRatio = ratios[index];
+      const fmIndex = gammaNorm * 0.55;
+      const ratios = [0.5, 0.75, 1, 1.25, 1.5, 2, 2.5];
+      const index = Math.min(Math.floor(clampedBeta * ratios.length), ratios.length - 1);
+      const fmRatio = ratios[index];
 
-  csound?.setControlChannel("fmIndex", fmIndex);
-  csound?.setControlChannel("fmRatio", fmRatio);
-}
+      csound?.setControlChannel("fmIndex", fmIndex);
+      csound?.setControlChannel("fmRatio", fmRatio);
+    }
 
   </script>
 
