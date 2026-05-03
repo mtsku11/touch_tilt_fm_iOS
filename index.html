@@ -209,7 +209,15 @@
           }
         }
         if (tiltResult === 'granted') {
-          window.addEventListener('deviceorientation', handleTilt);
+          if (inIframe) {
+            // iOS does not fire deviceorientation inside cross-origin iframes even after
+            // permission is granted. The parent page forwards tilt data via postMessage.
+            window.addEventListener('message', function(e) {
+              if (e.data && e.data.type === 'tiltData') handleTilt(e.data);
+            });
+          } else {
+            window.addEventListener('deviceorientation', handleTilt);
+          }
         } else {
           alert("Tilt permission denied");
         }
